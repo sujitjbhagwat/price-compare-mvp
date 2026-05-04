@@ -398,19 +398,33 @@ const SOURCES = [
   },
 ];
 
+function buildFetchUrl(targetUrl) {
+  const apiKey = process.env.SCRAPER_API_KEY || "";
+  if (!apiKey) return { fetchUrl: targetUrl, usingProxy: false };
+
+  // ScraperAPI: render=false (faster, HTML-only), country_code=in for Indian prices
+  const proxy = `http://api.scraperapi.com?api_key=${apiKey}&country_code=in&url=${encodeURIComponent(targetUrl)}`;
+  return { fetchUrl: proxy, usingProxy: true };
+}
+
 async function fetchHtml(url) {
+  const { fetchUrl, usingProxy } = buildFetchUrl(url);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  // ScraperAPI can take longer — give it more time when proxy is active
+  const timeout = usingProxy ? Math.max(REQUEST_TIMEOUT_MS, 25000) : REQUEST_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(fetchUrl, {
       signal: controller.signal,
-      headers: {
-        "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-IN,en;q=0.9",
-        "Cache-Control": "no-cache",
-      },
+      headers: usingProxy
+        ? {} // ScraperAPI sets its own headers
+        : {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-IN,en;q=0.9",
+            "Cache-Control": "no-cache",
+          },
     });
 
     const html = await response.text();
@@ -419,6 +433,7 @@ async function fetchHtml(url) {
       ok: response.ok,
       status: response.status,
       html,
+      usingProxy,
     };
   } finally {
     clearTimeout(timer);
